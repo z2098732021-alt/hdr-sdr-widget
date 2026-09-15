@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>HDR SDR 提示</title>
+  </head>
+  <body>
+    <!--
+      Toast 窗口（独立 webview）。
+
+      存在原因：悬浮物窗口只有 68×228 逻辑像素，胶囊本身宽 40px 且
+      `overflow: hidden` —— 在那里渲染提示条，一行放不下六个汉字，等于没有。
+      提示必须有独立显示面，且不能抢焦点（它是通知，不是对话框）。
+    -->
+    <div id="toast-root"></div>
+    <script type="module" src="/toast.ts"></script>
+  </body>
+</html>

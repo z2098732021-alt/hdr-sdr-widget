@@ -1,0 +1,355 @@
+/* ============================================================
+ * widget.css —— Liquid Glass 胶囊样式（v0.3.1）
+ *
+ * 光学层叠（自下而上）：
+ *
+ *   .capsule ......... 几何 + transform + 交互态（**不裁剪**）
+ *     ├ .capsule-clip .... 圆角裁剪容器
+ *     │   ├ .backdrop ...... 背景捕获帧 canvas（JS 逐像素写入折射 + 色散）
+ *     │   ├ .fill-clip/.fill 液态区域
+ *     │   ├ .glass-tint ..... 玻璃主体微色调
+ *     │   ├ .glass-sheen .... 对角高光
+ *     │   ├ .glass-rim ...... 迎光/背光边缘细环
+ *     │   ├ .press-light .... 点击局部折射反馈
+ *     │   └ .hdr-dot ........ HDR 未开启指示点
+ *     └ .glass-bloom ×3 ... HDR 感泛光（**必须溢出胶囊**，故在 clip 之外）
+ *
+ * 为什么裁剪要下沉到 .capsule-clip：
+ *   v0.2 把 `overflow: hidden` 放在 .capsule 上，泛光层会被裁掉外沿，
+ *   结果"发光"退化成"描边"。而泛光层又必须留在 .capsule 内才能继承
+ *   hover/press/drag 的 transform（否则胶囊缩放时高光不跟手）。
+ *   拆成 几何层(不裁) / 裁剪层(裁) 两层，两个约束同时满足。
+ *
+ * 关键：折射用 JS 逐像素写入 canvas（见 liquidGlass.ts），CSS 只负责
+ *   `filter` 磨砂 + 校色。早先的 WebGL / SVG feImage / backdrop-filter:url()
+ *   方案在 WebView2 透明窗口下全部已验证不可行，不要再回头试。
+ * ============================================================ */
+
+/* 背景捕获帧：铺满胶囊。折射 + 色散由 JS 逐像素写入 canvas（见 liquidGlass.ts），
+   CSS 只负责磨砂 + 校色 —— 早先的 WebGL / SVG feImage 方案都已废弃。 */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  /* ⚠️ 这里**只允许磨砂**，不要再加 brightness/contrast/saturate。
+   *
+   * 真玻璃是**光学中性**的：它弯折背景、略微透过，但不改变背景的亮度与饱和度。
+   * 曾经这里是 `contrast(1.12) brightness(1.06) saturate(1.25)` —— 那是**第二级提亮**：
+   * 背景变亮 → 采样值变亮 → 再被 ×1.06 并做对比度拉伸 → 玻璃明显比背景白。
+   * 用户实测原话："背景变亮的同时它再变亮一次，导致调亮后实际观看它是严重过曝的，
+   * 明显比背景白得多"。去掉这三个函数即可让玻璃与背景**亮度一致**。 */
+  /* ⚠️ 这里的 blur 与 liquidGlass.ts 的 `frost` 层**叠加**（折射先从 frost 取样，
+   * 输出再经这一道 CSS blur）→ 净半径 ≈ √2 × 令牌。调 --glass-blur 时按此折算，
+   * 否则会得到"改了幅度对不上"的体感。 */
+  filter: blur(var(--glass-blur));
+  -webkit-filter: blur(var(--glass-blur));
+}
+
+/* 胶囊本体：只负责几何、transform 与交互态，**不做裁剪**（见文件头说明） */
+.capsule {
+  position: absolute;
+  left: var(--capsule-margin);
+  top: var(--capsule-margin);
+  width: var(--capsule-w);
+  height: var(--capsule-h);
+  border-radius: var(--capsule-radius);
+  overflow: visible;
+  cursor: default;
+  transform-origin: center;
+  will-change: transform;
+
+  /* 内侧 inset shadow（厚玻璃内侧阴影） + 外投影。
+     注：玻璃主体 neutral tint 由 .glass-tint 子层提供（不透明 WebGL canvas 会盖住本元素 background）。 */
+  /* 高透版：只留外投影（读作"浮起"），去掉内侧 inset —— 内阴影让玻璃像有一层壳，
+   * 与"全透"冲突。 */
+  box-shadow: var(--glass-shadow);
+}
+
+/* 圆角裁剪容器：所有会被裁掉的层放这里 */
+.capsule-clip {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 相位驱动：hover / press / drag 的物理响应（GPU transform，不触发 layout） */
+.capsule[data-hover="true"] {
+  transform: scale(1.04, 1.012);
+  box-shadow: var(--glass-shadow-hover);
+  transition: transform var(--t-hover) var(--spring-settle),
+    box-shadow var(--t-hover) var(--spring-settle);
+}
+.capsule[data-pressed="true"] {
+  transform: scale(1.02, 0.985);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.30);
+  transition: transform var(--t-press) var(--spring-settle),
+    box-shadow var(--t-press) var(--spring-settle);
+}
+.capsule[data-dragging="true"] {
+  transform: scale(1.05, 1.02);
+  box-shadow: var(--glass-shadow-hover);
+  transition: transform var(--t-hover) var(--spring-settle),
+    box-shadow var(--t-hover) var(--spring-settle);
+}
+/* 默认态（回落用克制 spring） */
+.capsule[data-hover="false"][data-pressed="false"][data-dragging="false"] {
+  transform: scale(1, 1);
+  transition: transform var(--t-release) var(--spring-release),
+    box-shadow var(--t-release) var(--spring-settle);
+}
+
+/* 相位透明度（物理滑出由 Rust 窗口位移完成） */
+.capsule[data-phase="hiding"],
+.capsule[data-phase="hidden"] {
+  opacity: 0.75;
+  transition: opacity 260ms var(--spring-settle);
+}
+.capsule[data-phase="revealing"] {
+  opacity: 0.7;
+}
+.capsule[data-phase="visible"],
+.capsule[data-phase="hovered"],
+.capsule[data-phase="pressed"],
+.capsule[data-phase="dragging"] {
+  opacity: 1;
+  transition: opacity 260ms var(--spring-settle);
+}
+.capsule[data-phase="suppressed"] {
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+/* ---- Fill：液态区域（裁剪到胶囊，位于光学层之上、纹样之下） ---- */
+.fill-clip {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--capsule-radius);
+  overflow: hidden;
+  pointer-events: none;
+}
+.fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0%; /* JS 驱动 */
+  /* 弯月面：1px 顶面亮线 + 2px 窄暗带（只占最上面 3px，液面主体仍是「整片均匀白」）。
+   * 这是白纱降到 0.34 后、在纯白背景下仍读得出液位的唯一手段 —— 09-14 实测：
+   * 纯白底上白色液面与背景的亮度差只剩 +7.3，靠白度永远读不出来。 */
+  background:
+    linear-gradient(
+      to bottom,
+      var(--fill-edge) 0 1px,
+      var(--fill-meniscus-dark) 1px 3px,
+      transparent 3px
+    ),
+    var(--fill-color);
+  backdrop-filter: blur(var(--fill-blur));
+  -webkit-backdrop-filter: blur(var(--fill-blur));
+  /* 让位遮罩：白纱与其磨砂在最外 --fill-edge-fade 内 alpha → 0。
+   * 折射带（`--glass-disp-band` = 10px）里位移最大的那一段因此以 100% 对比度呈现，
+   * 而液面读数宽度**不变**（是 alpha 斜坡，不是几何收窄）。
+   * 只做左右、不做上下：上边是液位线（必须绝对锐利），下边与胶囊底缘重合。 */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fill-edge-fade),
+    #000 calc(100% - var(--fill-edge-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fill-edge-fade),
+    #000 calc(100% - var(--fill-edge-fade)),
+    transparent 100%
+  );
+  will-change: height;
+}
+/* ---- 玻璃主体 neutral tint（叠在折射背景上，非常克制，非磨砂白块） ---- */
+.glass-tint {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--capsule-radius);
+  background: linear-gradient(
+    160deg,
+    var(--glass-tint-a),
+    var(--glass-tint-b) 45%,
+    var(--glass-tint-a)
+  );
+  pointer-events: none;
+}
+
+/* ---- 对角高光（sheen，屏幕混合，非常轻微） ---- */
+.glass-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--capsule-radius);
+  background: linear-gradient(
+    118deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.02) 32%,
+    transparent 58%
+  );
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+/* ---- 边缘：迎光/背光渐变细环（非均匀白线） ---- */
+.glass-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--capsule-radius);
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    var(--glass-rim-hi) 0%,
+    rgba(255, 255, 255, 0.10) 26%,
+    rgba(255, 255, 255, 0.03) 44%,
+    rgba(0, 0, 0, 0.02) 62%,
+    rgba(255, 255, 255, 0.14) 82%,
+    var(--glass-rim-lo) 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ---- HDR 感泛光（bloom / halation） ----
+ *
+ * 结构是 父 > i 两层，不是随意拆的：
+ *   CSS 的滤镜在 mask **之前**应用。若把 blur 和 mask 放在同一元素上，
+ *   高斯模糊的结果会被 mask 重新裁回环带 → 外沿光晕被切掉，"发光"退回"描边"。
+ *   所以：子层 `i` 负责做出环带（mask），父层负责 blur（此时才可能溢出）。
+ *
+ * 三层半径 2.5 / 5 / 10px，不透明度递减，累加后形成连续衰减的光晕核 —— 这是
+ * 模拟 bloom 的标准做法。`plus-lighter` 是**真加法**混合（screen 是软饱和，
+ * 高光本来就接近纯白，screen 加不上去，做不出过曝感）。
+ *
+ * 为什么放在 .capsule-clip 之外：泛光必须能溢出胶囊边界才叫发光。
+ * 为什么留在 .capsule 之内：要继承 hover/press/drag 的 transform。
+ */
+.glass-bloom {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--capsule-radius);
+  pointer-events: none;
+  mix-blend-mode: plus-lighter;
+  transition: opacity var(--t-hover) var(--spring-settle);
+}
+/* 环带本体：只有 padding 区可见，构成跟随圆角的 1.6px 亮环 */
+.glass-bloom > i {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: inherit;
+  padding: var(--hdr-bloom-band);
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 1) 0%,
+    rgba(255, 255, 255, 0.62) 16%,
+    rgba(255, 255, 255, 0.14) 40%,
+    rgba(255, 255, 255, 0.04) 58%,
+    rgba(255, 255, 255, 0.26) 84%,
+    rgba(255, 255, 255, 0.55) 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+.glass-bloom.bloom-near {
+  filter: blur(var(--hdr-bloom-near));
+  opacity: var(--hdr-bloom-o-near);
+}
+.glass-bloom.bloom-mid {
+  filter: blur(var(--hdr-bloom-mid));
+  opacity: var(--hdr-bloom-o-mid);
+}
+.glass-bloom.bloom-far {
+  filter: blur(var(--hdr-bloom-far));
+  opacity: var(--hdr-bloom-o-far);
+}
+
+/* 交互态：泛光跟手变化。iOS 的规律是"按压时高光收进去、拖拽时最张扬"。 */
+.capsule[data-hover="true"] .glass-bloom {
+  opacity: calc(var(--hdr-bloom-o-near) * var(--hdr-bloom-k-hover));
+}
+.capsule[data-hover="true"] .glass-bloom.bloom-mid {
+  opacity: calc(var(--hdr-bloom-o-mid) * var(--hdr-bloom-k-hover));
+}
+.capsule[data-hover="true"] .glass-bloom.bloom-far {
+  opacity: calc(var(--hdr-bloom-o-far) * var(--hdr-bloom-k-hover));
+}
+.capsule[data-dragging="true"] .glass-bloom {
+  opacity: calc(var(--hdr-bloom-o-near) * var(--hdr-bloom-k-drag));
+}
+.capsule[data-dragging="true"] .glass-bloom.bloom-mid {
+  opacity: calc(var(--hdr-bloom-o-mid) * var(--hdr-bloom-k-drag));
+}
+.capsule[data-dragging="true"] .glass-bloom.bloom-far {
+  opacity: calc(var(--hdr-bloom-o-far) * var(--hdr-bloom-k-drag));
+}
+.capsule[data-pressed="true"] .glass-bloom {
+  opacity: calc(var(--hdr-bloom-o-near) * var(--hdr-bloom-k-press));
+  transition: opacity var(--t-press) ease-out;
+}
+.capsule[data-pressed="true"] .glass-bloom.bloom-mid {
+  opacity: calc(var(--hdr-bloom-o-mid) * var(--hdr-bloom-k-press));
+}
+.capsule[data-pressed="true"] .glass-bloom.bloom-far {
+  opacity: calc(var(--hdr-bloom-o-far) * var(--hdr-bloom-k-press));
+}
+
+/* ---- 点击局部反馈：非常微弱的径向高光（非 ripple） ---- */
+.press-light {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.16),
+    transparent 70%
+  );
+  mix-blend-mode: screen;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-feedback) ease-out;
+}
+.press-light.on {
+  opacity: 1;
+  transition: opacity 40ms ease-out;
+}
+
+/* ---- HDR 未开启指示点（抽象状态，非图标/数字） ---- */
+.hdr-dot {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 6px rgba(255, 159, 10, 0.7);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.capsule[data-hdr="off"] .hdr-dot {
+  opacity: 1;
+}
+
+/* ---- 提示（Toast）----
+ * v0.3：提示不再在胶囊内渲染。胶囊宽 40 逻辑像素且 overflow: hidden，
+ * 放不下任何可读文本 —— 提示改由独立 Toast 窗口承载，样式见 toastWin.css。
+ * 这里保留命名说明，避免后来者又往胶囊里塞提示层。
+ */

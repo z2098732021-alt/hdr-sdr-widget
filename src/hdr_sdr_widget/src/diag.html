@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>HDR SDR 诊断面板</title>
+  </head>
+  <body>
+    <!--
+      诊断窗口（独立 webview，托盘「诊断面板…」打开）。
+
+      存在意义：v0.3 之前"玻璃不亮"只能靠猜。本页同时呈现三个独立信号——
+        ① Rust 采集端统计（DDA 会话是否建立、拷贝是否成功）；
+        ② 面板窗口上报的渲染端状态（解码了几帧、有几帧判定为空白）；
+        ③ 本页自己拉取的原始帧预览（后端此刻到底在发什么像素）。
+      三者对不上，故障就被夹在中间那一段，不用再二分法试。
+    -->
+    <div id="diag"></div>
+    <script type="module" src="/diag.ts"></script>
+  </body>
+</html>

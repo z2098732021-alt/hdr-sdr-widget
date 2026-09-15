@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>HDR SDR 内容亮度</title>
+  </head>
+  <body>
+    <!--
+      悬浮物根容器。胶囊结构（背景捕获帧 / 玻璃光学层 / Fill / 反馈）由
+      src/main.ts 装配时渲染进 #app，静态结构只保留根容器。
+      窗口 = 胶囊 + 四周透明 halo（68×228），胶囊 40×200 居中（margin 14）；
+      透明四角由 CSS 圆角 + 窗口透明实现。
+      尺寸以 src/styles/tokens.css 为准（此处不再重复数值以免漂移）。
+    -->
+    <div id="app"></div>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

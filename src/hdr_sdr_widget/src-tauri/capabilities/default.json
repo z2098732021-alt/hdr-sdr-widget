@@ -1,0 +1,25 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "最小权限集：仅允许窗口自操作与事件，不开放 fs / shell / http。",
+  "windows": ["panel"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-position",
+    "core:window:allow-inner-position",
+    "core:window:allow-outer-position",
+    "core:window:allow-scale-factor",
+    "core:window:allow-is-visible",
+    "core:window:allow-current-monitor",
+    "core:window:allow-available-monitors",
+    "core:window:allow-primary-monitor",
+    "core:webview:allow-webview-position",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to",
+    "opener:default"
+  ]
+}

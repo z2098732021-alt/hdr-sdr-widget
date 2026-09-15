@@ -1,0 +1,141 @@
+/* ============================================================
+ * tokens.css —— Liquid Glass 设计令牌（v0.2.0）
+ *
+ * 光学 / 动效参数集中在此，组件样式禁止裸值。
+ * `--spring-pop` / `--spring-settle` 与 Rust `anim.rs` 采样参数逐字一致。
+ * 尺寸为 DIP（逻辑像素）；玻璃位移 / 模糊等光学参数同样以 DIP 表达，
+ * 保证 175% 高 DPI 下视觉尺寸一致。
+ * ============================================================ */
+
+:root {
+  /* ---- 尺寸：窗口 = 胶囊 + 四周透明 halo ---- */
+  --window-w: 68px;
+  --window-h: 228px;
+  --capsule-w: 40px;
+  --capsule-h: 200px;
+  --capsule-radius: 20px;
+  --capsule-margin: 14px; /* 胶囊在窗口内的边距（halo 宽） */
+
+  /* ---- 光学参数（DIP） ---- */
+  --glass-disp-max: 8px;     /* 边缘最大折射位移。**别超过 9px**：再大就变成"放大镜"，
+                              * 与背景的错位感明显（用户曾反馈"缩放可以稍微小一点"）。
+                              * 8px 是本轮与用户共同定的折中值。 */
+  --glass-disp-band: 10px;   /* 折射从边缘向内衰减的距离带。带更宽 → 弯曲更渐进、更像透镜 */
+  --glass-ca-mag: 0.7px;     /* 色散最大偏移（仅硬边可察觉；0.7×1.75 ≈ 1.2 设备像素） */
+
+  /* ---- 边缘三件事（v0.3.2 高透回归后重新打开）----
+   *
+   * 真玻璃的边缘是「弯折 + 一条细高光 + 一点厚度暗边」三件叠加，**没有一件是整圈变亮**：
+   *   1. 折射弯折（--glass-disp-max，主导观感）
+   *   2. 迎光侧极细镜面高光（--glass-spec-gain：加性、方向性、收窄到 1–2px）
+   *   3. 紧贴内侧略暗（--glass-inner-shade：乘性，只压最外缘）
+   *
+   * ⚠️ 高光**不能用乘法增益**：它随背景亮度缩放，本质是在制造"与背景的亮度偏差"
+   * （旧实现 ×1.55 → 整圈过曝发白，用户实测"一圈亮白色非常奇怪"）。加性 + 方向性才对。
+   */
+  --glass-spec-gain: 0.12;   /* 迎光侧镜面高光加性峰值。安全区间 0.08–0.15：
+                              * 峰值增量 ≤ 0.12×255 ≈ 31 级，且 strength^5 使其只有 2–4px 宽。
+                              * ⚠️ ≥0.22 会在亮背景上连续饱和 3px+ → 又变成白描边 */
+  --glass-inner-shade: 0.10; /* 内侧压暗强度（最深只在外缘 ×0.90）。安全区间 0.06–0.14。
+                              * strength=0 的玻璃本体完全不受影响 → 不会"背景发灰" */
+  --glass-blur: 0.45px;      /* 磨砂模糊半径（DIP）。
+                              * ⚠️ 该令牌被应用**两次**：liquidGlass.ts 的 frost 层 + widget.css
+                              * 的 .backdrop filter → 净半径 ≈ √2 × 令牌（≈0.64px）。 */
+
+  /* ---- HDR 感泛光：v0.3.2 高透版**整体关闭** ----
+   *
+   * 泛光让高光溢出胶囊边界、制造"发光"观感，但外圈那层大光晕是"假"的主因
+   * （用户实测"一圈亮白色非常奇怪"），且与"背景清晰透过来"的目标冲突。
+   * 令牌保留（置 0），以后想恢复泛光改这里即可，不必翻 CSS 层。
+   */
+  --hdr-bloom-band: 1.6px;      /* 泛光取自的边缘环带厚度 */
+  --hdr-bloom-near: 2.5px;      /* 近场泛光模糊半径 */
+  --hdr-bloom-mid: 5px;         /* 中场 */
+  --hdr-bloom-far: 10px;        /* 远场（大光晕） */
+  --hdr-bloom-o-near: 0;        /* 各层不透明度（0 = 关闭） */
+  --hdr-bloom-o-mid: 0;
+  --hdr-bloom-o-far: 0;
+  /* 交互态下的泛光强度倍率（iOS：按压时高光收，拖拽时最亮） */
+  --hdr-bloom-k-hover: 1.28;
+  --hdr-bloom-k-drag: 1.45;
+  --hdr-bloom-k-press: 0.72;
+
+  /* ---- 玻璃主体色调：保持「高透」—— tint 全透明，不改背景色 ----
+   * 只留边缘一圈极淡倒角高光读作"玻璃边界"。 */
+  --glass-tint-a: rgba(255, 255, 255, 0);
+  --glass-tint-b: rgba(255, 255, 255, 0);
+  --glass-rim-hi: rgba(255, 255, 255, 0.36);  /* 迎光方向倒角高光。**别回到 0.9** ——
+                                              * 那等于给玻璃描了条白边（用户实测反馈）。
+                                              * 0.42 曾通过验收，取 0.36 留余量 */
+  --glass-rim-lo: rgba(0, 0, 0, 0.12);        /* 背光方向：一点厚度暗示 */
+  --glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  --glass-shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.36);
+
+  /* ---- Fill（亮度液面）：v0.3.2「白 + 模糊」，但**必须给折射让位** ----
+   *
+   * 白 —— 任何背景上都能一眼认出液位（fill 是唯一的亮度读数）
+   * 模糊 —— 液面里的背景内容退到后面，白色读数凸显出来
+   *
+   * ⚠️ 两个关键约束（本轮"光学效果全没了"的血泪教训）：
+   *   1. **模糊半径不能大**：折射只存在于胶囊边缘 `--glass-disp-band`（10px）带内，
+   *      8px 模糊会把边缘展宽到 ≈16px > 整个折射带 → 形变被整片抹平。
+   *      3px 时展宽 ≈7px，8px 的位移仍清晰可辨。
+   *   2. **白纱必须在最外几 px 让位**（`--fill-edge-fade`）：白色是整片的、折射只在边缘，
+   *      让最外 5px 的 alpha 渐变到 0，折射带位移最大的那一段就以 100% 对比度呈现；
+   *      液面读数宽度**不变**（是 alpha 斜坡，不是几何收窄）。 */
+  --fill-color: rgba(255, 255, 255, 0.34);  /* 液面白色主体（整片均匀，**不要**向下衰减） */
+  --fill-blur: 1.5px;                       /* 液面区域背景模糊半径。**别调大**（见上）。
+                                             * 实测「液面区内容细节保留率」：0px→62% / 1.5px→47% / 3px→33%。
+                                             * 取 1.5px：既是"白模糊"，又保住近半光学细节。 */
+  --fill-edge: rgba(255, 255, 255, 0.85);   /* 液面顶面亮线（白纱变淡后升为读数主边界） */
+  --fill-edge-fade: 5px;                    /* 液面左右外缘的 alpha 让位宽度 */
+  /** 顶面亮线紧贴其下的 2px 窄暗带 —— 「边界靠结构不靠白度」：
+   *  纯白背景下白色液面与背景的亮度差只剩 +7.3（实测），靠白度永远读不出来，
+   *  必须靠弯月面结构（亮线 + 紧贴暗带）。09-14 实测可做出 ≈40 级落差。 */
+  --fill-meniscus-dark: rgba(0, 0, 0, 0.16);
+
+  /* ---- 语义色 ---- */
+  --warning: #ff9f0a; /* HDR 未开启指示点 */
+
+  /* ---- 动效曲线（与 anim.rs 一致） ---- */
+  --spring-pop: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --spring-settle: cubic-bezier(0.32, 0.72, 0.24, 1);
+  --spring-release: cubic-bezier(0.34, 1.12, 0.44, 1); /* release：高阻尼、极小过冲 */
+
+  /* ---- 时长 ---- */
+  --t-hover: 190ms;      /* hover 物理响应 */
+  --t-press: 85ms;       /* press 压感 */
+  --t-release: 240ms;    /* release spring */
+  --t-feedback: 140ms;   /* 点击局部反馈淡出 */
+
+  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system,
+    "PingFang SC", "Microsoft YaHei UI", sans-serif;
+}
+
+/* 全局重置 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 应用根容器：与窗口同尺寸（80×288），透明 halo 由 CSS 圆角 + 窗口透明出 */
+#app {
+  position: relative;
+  width: var(--window-w);
+  height: var(--window-h);
+}

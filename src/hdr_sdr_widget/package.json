@@ -1,0 +1,23 @@
+{
+  "name": "hdr-sdr-widget",
+  "private": true,
+  "version": "0.4.5",
+  "type": "module",
+  "description": "Windows HDR「SDR 内容亮度」悬浮控制器 —— Apple Liquid Glass 深色毛玻璃面板",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.4.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.4.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.5"
+  }
+}

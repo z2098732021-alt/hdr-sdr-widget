@@ -1,0 +1,11 @@
+# Cargo 构建配置
+#
+# 用户 C 盘已用 87%（仅剩约 55GB），Rust target 目录可达 5–10GB。
+# 因此把编译产物全部重定向到 D 盘（架构决策 D10）。
+
+[build]
+# 2026-09：原目录 `hdr_sdr_widget` 存在被锁定缓存（LNK1104），改用干净目录。
+target-dir = "D:\\Agent\\.cargo-target\\hdr_sdr_widget_v2"
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

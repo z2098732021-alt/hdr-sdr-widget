@@ -1,0 +1,290 @@
+/* ============================================================
+ * diag.css —— 诊断窗口样式（v0.3）
+ *
+ * 与悬浮物同属一个应用，沿用 tokens.css 的字体与动效令牌；底色不用玻璃
+ * （诊断要的是可读性，不是观感）。所有颜色为深色主题下的中高对比组合。
+ * ============================================================ */
+
+:root {
+  --d-bg: #16181d;
+  --d-bg-soft: #1d2026;
+  --d-bg-card: #22262e;
+  --d-line: #2e333c;
+  --d-text: #e6e9ef;
+  --d-text-dim: #9aa3b2;
+  --d-text-faint: #6b7484;
+  --d-accent: #5ac8fa;
+  --d-ok: #4cd964;
+  --d-warn: var(--warning);
+  --d-bad: #ff453a;
+  --d-mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+}
+
+body {
+  background: var(--d-bg);
+  color: var(--d-text);
+  overflow: auto;
+}
+
+#diag {
+  padding: 14px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---- 头部 ---- */
+.d-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.d-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.d-head .d-spacer {
+  flex: 1;
+}
+.d-ver {
+  font-family: var(--d-mono);
+  font-size: 11px;
+  color: var(--d-text-faint);
+}
+
+/* ---- 状态药丸 ---- */
+.d-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--d-bg-card);
+  border: 1px solid var(--d-line);
+  color: var(--d-text-dim);
+  white-space: nowrap;
+}
+.d-pill .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--d-text-faint);
+  flex: 0 0 auto;
+}
+.d-pill[data-tone="ok"] {
+  color: var(--d-ok);
+  border-color: color-mix(in srgb, var(--d-ok) 40%, var(--d-line));
+}
+.d-pill[data-tone="ok"] .dot {
+  background: var(--d-ok);
+}
+.d-pill[data-tone="warn"] {
+  color: var(--d-warn);
+  border-color: color-mix(in srgb, var(--d-warn) 40%, var(--d-line));
+}
+.d-pill[data-tone="warn"] .dot {
+  background: var(--d-warn);
+}
+.d-pill[data-tone="bad"] {
+  color: var(--d-bad);
+  border-color: color-mix(in srgb, var(--d-bad) 40%, var(--d-line));
+}
+.d-pill[data-tone="bad"] .dot {
+  background: var(--d-bad);
+}
+.d-pill[data-tone="idle"] .dot {
+  animation: d-blink 1.6s ease-in-out infinite;
+}
+@keyframes d-blink {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---- 结论横幅 ---- */
+.d-verdict {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--d-bg-soft);
+  border: 1px solid var(--d-line);
+  border-left: 3px solid var(--d-text-faint);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.d-verdict[data-tone="ok"] {
+  border-left-color: var(--d-ok);
+}
+.d-verdict[data-tone="warn"] {
+  border-left-color: var(--d-warn);
+}
+.d-verdict[data-tone="bad"] {
+  border-left-color: var(--d-bad);
+}
+.d-verdict .hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--d-text-faint);
+  font-size: 11.5px;
+}
+
+/* ---- 卡片 ---- */
+.d-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+.d-card {
+  background: var(--d-bg-card);
+  border: 1px solid var(--d-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.d-card > h2 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--d-text-dim);
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--d-line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.d-card > h2 .d-spacer {
+  flex: 1;
+}
+.d-card .body {
+  padding: 4px 0;
+}
+.d-wide {
+  grid-column: 1 / -1;
+}
+
+/* ---- 键值行 ---- */
+.d-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 12px;
+  font-size: 12px;
+}
+.d-row > .k {
+  flex: 0 0 132px;
+  color: var(--d-text-dim);
+}
+.d-row > .v {
+  font-family: var(--d-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--d-text);
+  /* 用 `overflow-wrap: break-word` 而不是 `word-break: break-all`。
+     `break-all` 允许在**任意字符之间**断开 —— 实测把 `189,924` 断成
+     `189,92` / `4`，数字被拦腰截断，读起来要重新拼。
+     `overflow-wrap: break-word` 的语义是"正常按空格换行，只有单个 token
+     一行放不下时才在内部断开"，对超长路径 / HRESULT 依然安全。 */
+  overflow-wrap: break-word;
+}
+.d-row[data-tone="bad"] > .v {
+  color: var(--d-bad);
+}
+.d-row[data-tone="warn"] > .v {
+  color: var(--d-warn);
+}
+.d-row[data-tone="ok"] > .v {
+  color: var(--d-ok);
+}
+.d-row[data-tone="dim"] > .v {
+  color: var(--d-text-faint);
+}
+.d-note {
+  padding: 2px 12px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--d-text-faint);
+}
+
+/* ---- 预览 ---- */
+.d-preview {
+  padding: 10px 12px 12px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.d-stage {
+  position: relative;
+  flex: 0 0 auto;
+  background: #0c0d10;
+  border: 1px solid var(--d-line);
+  border-radius: 6px;
+  min-width: 168px;
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.d-stage canvas {
+  display: block;
+  max-width: 260px;
+  max-height: 200px;
+  image-rendering: pixelated;
+}
+.d-stage .placeholder {
+  font-size: 11.5px;
+  color: var(--d-text-faint);
+  padding: 24px 16px;
+  text-align: center;
+  line-height: 1.5;
+}
+.d-preview .meta {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- 按钮 ---- */
+.d-foot {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.d-btn {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--d-line);
+  background: var(--d-bg-card);
+  color: var(--d-text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.d-btn:hover {
+  background: #2a2f38;
+  border-color: #3d434e;
+}
+.d-btn:active {
+  background: #232830;
+}
+.d-btn[data-kind="primary"] {
+  border-color: color-mix(in srgb, var(--d-accent) 45%, var(--d-line));
+  color: var(--d-accent);
+}
+.d-foot .d-spacer {
+  flex: 1;
+}
+.d-stamp {
+  font-size: 11px;
+  color: var(--d-text-faint);
+  font-family: var(--d-mono);
+}

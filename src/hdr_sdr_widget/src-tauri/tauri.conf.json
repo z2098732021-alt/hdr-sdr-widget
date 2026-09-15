@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HDR SDR 控制器",
+  "version": "0.4.5",
+  "identifier": "com.hdrsdr.widget",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "panel",
+        "create": false,
+        "title": "HDR SDR 内容亮度",
+        "width": 68,
+        "height": 228,
+        "minWidth": 68,
+        "minHeight": 228,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": false,
+        "shadow": false,
+        "focus": false,
+        "additionalBrowserArgs": "--in-process-gpu --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://glass.localhost; font-src 'self'"
+    },
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
+  },
+  "plugins": {}
+}

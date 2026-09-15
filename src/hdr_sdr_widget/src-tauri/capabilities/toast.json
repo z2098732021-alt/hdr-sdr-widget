@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "toast",
+  "description": "提示窗口。只需订阅发给自己的事件载荷（`toast:item` 走 plugin:event|listen，受 ACL 管辖）；收起窗口走应用自有命令 hide_toast_window。",
+  "windows": ["toast"],
+  "permissions": ["core:event:allow-listen"]
+}

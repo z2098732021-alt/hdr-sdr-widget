@@ -1,0 +1,76 @@
+# Local agent/work directories
+.workbuddy/
+
+# Local release packages and QA evidence (published through GitHub Releases)
+deliverables/
+
+# JavaScript dependencies and generated frontend output
+**/node_modules/
+**/dist/
+**/dist_old*/
+**/.vite/
+**/.vite-temp/
+
+# Rust build output
+**/target/
+
+# Python caches
+**/__pycache__/
+**/*.py[cod]
+
+# Editors and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local environment and signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+
+# Build, test, and diagnostic logs
+*.log
+/*.txt
+src/hdr_sdr_widget/*.txt
+*_out.txt
+*_utf8.txt
+*_exit.txt
+*_log.txt
+*_check.txt
+*_count.txt
+*_count2.txt
+*_list.txt
+*_status.txt
+*_status2.txt
+*_size.txt
+cargo_cache.txt
+cargo_cfg.txt
+cleanup_log.txt
+dist_all.txt
+env_check.txt
+path_out.txt
+prep_log.txt
+rename_log.txt
+rm_err.txt
+rustup_check.txt
+target_cfg.txt
+test_summary.txt
+toolchain_out.txt
+ver_out.txt
+
+# Generated binaries, installers, debug symbols, and raw captures
+*.exe
+*.msi
+*.pdb
+*.dmp
+*.rgba32f
+*.ppm
+
+# Local tool binaries (scripts and test cards remain tracked)
+tools/*.exe

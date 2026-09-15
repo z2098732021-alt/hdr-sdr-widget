@@ -1,0 +1,115 @@
+[package]
+name = "hdr-sdr-widget"
+version = "0.4.5"
+description = "Windows HDR「SDR 内容亮度」悬浮控制器"
+edition = "2021"
+# 1.82 是下限：`Option::is_none_or` 在此版本稳定，`WatcherHandle::is_finished` 用它。
+rust-version = "1.82"
+build = "build.rs"
+default-run = "hdr-sdr-widget"
+
+# 库目标承载 L1 原生层 + L2 逻辑层，**不依赖 tauri**。
+# 这样 `cargo build --bin probe` 只编译 lib，秒级出验证可执行文件，
+# 不会被 Tauri 的漫长构建拖慢 T02 的验证迭代。
+[lib]
+name = "hdr_sdr_widget_lib"
+path = "src/lib.rs"
+
+# 主程序（Tauri 应用），T03 填充。
+[[bin]]
+name = "hdr-sdr-widget"
+path = "src/main.rs"
+
+# 验证执行体：read / loop(V2) / sweep(V6)。零额外依赖。
+[[bin]]
+name = "probe"
+path = "src/bin/probe.rs"
+
+# DDA 桌面捕获诊断探针。
+[[bin]]
+name = "probe-capture"
+path = "src/bin/probe_capture.rs"
+
+# DDA 帧格式诊断探针（只读）：坐实 HDR 下 acquired 纹理的真实 DXGI_FORMAT
+# 与 CopySubresourceRegion 是否成功。
+[[bin]]
+name = "probe-dda"
+path = "src/bin/probe_dda.rs"
+
+[features]
+# ⚠️ 生产构建**必须**启用本特征，否则打出来的 exe 是白屏。
+#
+# 因果链（已在 tauri 2.11.5 / tauri-codegen 2.6.3 源码坐实）：
+#   未启用 → tauri 的构建脚本发出 `cargo:dev=true` → `AssetResolver` 走
+#   `from_dev_url`（即 tauri.conf.json 的 `build.devUrl`）→ 前端资源**根本不嵌入**
+#   二进制 → 用户双击后本地没有 1420 dev server，WebView 加载失败 = 白屏。
+#   启用   → 走 `from_embedded`，`tauri-codegen` 把 dist/ 压缩后写入
+#   `OUT_DIR/tauri-codegen-assets/` 并嵌进 exe。
+#
+# `tauri build` 会自动带上；**手工调用 cargo 时必须显式**：
+#   cargo build --release --features custom-protocol
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# --- Tauri（仅主程序 bin 使用） ---
+tauri = { version = "2", features = ["tray-icon", "unstable"] }
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+
+# --- 序列化 ---
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# --- base64：帧走 IPC 传输需要把二进制编码成字符串 ---
+base64 = "0.22"
+
+# --- 错误处理 ---
+thiserror = "2"
+
+# --- 全局单例 ---
+once_cell = "1"
+
+# --- Win32 绑定（注册表 / 电源通知 / 消息 / 模块加载 / DDA 捕获） ---
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_Power",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Dwm",
+    "Win32_Devices_Display",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_System_Performance",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_HiDpi",
+    "Graphics_Capture",
+    "Graphics_DirectX_Direct3D11",
+    "Foundation",
+    "Security_Authorization_AppCapabilityAccess",
+]
+
+[dev-dependencies]
+serial_test = "3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

@@ -1,0 +1,65 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户（章）
+    participant HK as hotkey.rs<br/>(RegisterHotKey)
+    participant W as window.rs<br/>(Tauri Window)
+    participant UI as panel.ts / slider.ts
+    participant BR as bridge.ts
+    participant CMD as commands.rs
+    participant C as controller.rs
+    participant CV as convert.rs<br/>(纯函数)
+    participant API as win32/display.rs
+    participant OS as user32.dll
+
+    U->>HK: Ctrl+Alt+B
+    HK->>C: refresh()（预热，窗口未显示时先行）
+    C->>API: enumerate_targets()
+    API->>OS: GetDisplayConfigBufferSizes + QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS)
+    OS-->>API: PathInfo[1]  (Mi Monitor, adapterId 0x127E9, targetId 4354)
+    API->>OS: DisplayConfigGetDeviceInfo(GET_ADVANCED_COLOR_INFO=9)
+    OS-->>API: supported=1 enabled=1 bpc=12
+    API->>OS: DisplayConfigGetDeviceInfo(GET_SDR_WHITE_LEVEL=11)
+    OS-->>API: raw=2850
+    API-->>C: DisplayTarget + HdrState + raw
+    C->>CV: raw_to_percent(2850) / raw_to_nits(2850)
+    CV-->>C: Percent(37) / 228.0 nits
+    C-->>HK: Vec<DisplayState>
+    HK->>W: show() + 定位（跟随鼠标显示器 / 上次位置）
+    W->>UI: emit "panel:show" { displays }
+    UI->>UI: spring 动画 220ms cubic-bezier(.175,.885,.32,1.275)<br/>scale .94→1 opacity 0→1
+    UI-->>U: 面板呈现（<50ms，窗口已预驻留）
+
+    U->>UI: 拖动滑块 → percent 62
+    UI->>UI: rAF 连续插值渲染（60fps，不等写入返回）
+    UI->>BR: setPercent(key, 62)  【节流 ≥30ms + 整数去重】
+    BR->>CMD: invoke("set_percent", {key, 62})
+    CMD->>C: set_percent(key, Percent(62))
+    C->>CV: percent_to_raw(62)
+    CV-->>C: 1000 + 50×62 = 4100
+    C->>C: clamp_raw / 去重（与 cache 相同则跳过）
+    C->>API: write_sdr_white(target, 4100)
+    API->>OS: DisplayConfigSetDeviceInfo(SET=0xFFFFFFEE, {4100, final_value=1})
+    OS-->>API: rc
+    alt rc == 0（成功）
+        API-->>C: Ok(())
+        C->>API: read_sdr_white(target)  【回读校验】
+        API->>OS: DisplayConfigGetDeviceInfo(GET=11)
+        OS-->>API: raw'
+        API-->>C: raw'
+        alt raw' == 4100
+            C-->>CMD: WriteResult::Applied(4100)
+        else raw' != 4100（系统吸附到更粗粒度）
+            C->>CV: raw_to_percent(raw')
+            C-->>CMD: WriteResult::Adjusted{4100, raw'}
+            CMD-->>UI: Adjusted
+            UI->>UI: 滑块 spring 磁吸到 raw'（120ms），不回弹跳动
+        end
+    else rc != 0（失败 / 权限 / 不支持）
+        API-->>C: Err(AppError::ApiFailed(rc))
+        C->>C: 连续失败计数 ≥3 ? 切 DwmFallback : 保持主路线
+        C-->>CMD: Err(AppError)
+        CMD-->>UI: failed{code, message}
+        UI->>UI: 滑块 spring 回到原值 + Toast 中文原因 + “复制诊断信息”
+    end
+    CMD-->>BR: WriteResult / AppError
+    BR-->>UI: Promise resolve

@@ -1,0 +1,127 @@
+classDiagram
+    class Percent {
+        +u8 value
+        +clamp(u8) Percent
+    }
+    class UnitConvert {
+        <<pure function>>
+        +percent_to_raw(Percent) u32
+        +raw_to_percent(u32) Percent
+        +raw_to_nits(u32) f64
+        +percent_to_nits(Percent) f64
+        +percent_to_multiple(Percent) f64
+        +clamp_raw(u32) u32
+    }
+    class DisplayTarget {
+        +String key
+        +String name
+        +u32 index
+        +bool is_primary
+        +u32 output_tech
+        +u64 adapter_luid
+        +u32 target_id
+        +is_stale() bool
+    }
+    class HdrState {
+        +bool supported
+        +bool enabled
+        +u8 bits_per_color
+        +is_usable() bool
+    }
+    class DisplayState {
+        +DisplayTarget target
+        +HdrState hdr
+        +u32 raw
+        +Percent percent
+        +f64 nits
+        +bool readable
+    }
+    class DisplayConfigApi {
+        <<win32 safe wrapper>>
+        +enumerate_targets() Result~Vec~DisplayTarget~~
+        +read_sdr_white(DisplayTarget) Result~u32~
+        +write_sdr_white(DisplayTarget,u32) Result~()~
+        +read_advanced_color(DisplayTarget) Result~HdrState~
+        +probe_write_support() WriteCapability
+    }
+    class DwmFallback {
+        <<degraded route>>
+        +is_available() bool
+        +set_boost(HMONITOR,f64) Result~()~
+    }
+    class BrightnessController {
+        -HashMap~String,u32~ cache
+        -HashMap~String,Instant~ last_write
+        -WriteRoute route
+        +refresh() Result~Vec~DisplayState~~
+        +set_percent(String,Percent) Result~WriteResult~
+        +set_raw(String,u32) Result~WriteResult~
+        +apply_to_all(Percent) Result~Vec~WriteResult~~
+    }
+    class WriteResult {
+        <<enum>>
+        Applied(u32)
+        Adjusted(u32,u32)
+        Failed(AppError)
+    }
+    class AppError {
+        <<enum>>
+        ApiFailed(i32)
+        NotSupported
+        HdrDisabled
+        TargetNotFound
+        PermissionDenied
+        +user_message() String
+    }
+    class AppSettings {
+        +u32 version
+        +String unit
+        +u8 step
+        +u8 step_shift
+        +String hotkey
+        +bool follow_mouse_monitor
+        +bool hide_on_blur
+        +bool autostart
+        +WindowPos last_window_pos
+        +String last_monitor_key
+        +Vec~Preset~ presets
+        +HashMap~String,u8~ per_monitor_memory
+        +load() AppSettings
+        +save() Result~()~
+    }
+    class Preset {
+        +String id
+        +String name
+        +u8 percent
+        +String icon_id
+    }
+    class MonitorWatcher {
+        +start(tx:Sender~MonitorEvent~)
+    }
+    class Commands {
+        <<tauri command>>
+        +list_displays() Vec~DisplayState~
+        +set_percent(String,u8) WriteResult
+        +apply_preset(String) WriteResult
+        +get_settings() AppSettings
+        +save_settings(AppSettings)
+        +open_hdr_settings()
+        +get_diagnostics() Diagnostics
+    }
+
+    DisplayState *-- DisplayTarget
+    DisplayState *-- HdrState
+    DisplayState --> Percent
+    BrightnessController --> DisplayConfigApi : 主路线
+    BrightnessController --> DwmFallback : 降级
+    BrightnessController --> UnitConvert : 换算
+    BrightnessController ..> WriteResult
+    BrightnessController ..> AppError
+    BrightnessController --> DisplayState
+    DisplayConfigApi ..> DisplayTarget : 枚举产出
+    DisplayConfigApi ..> HdrState
+    AppSettings *-- Preset
+    AppSettings *-- WindowPos
+    MonitorWatcher ..> BrightnessController : 触发 refresh
+    Commands --> BrightnessController
+    Commands --> AppSettings
