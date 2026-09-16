@@ -1,6 +1,6 @@
 [package]
 name = "hdr-sdr-widget"
-version = "0.4.5"
+version = "0.4.6"
 description = "Windows HDR「SDR 内容亮度」悬浮控制器"
 edition = "2021"
 # 1.82 是下限：`Option::is_none_or` 在此版本稳定，`WatcherHandle::is_finished` 用它。

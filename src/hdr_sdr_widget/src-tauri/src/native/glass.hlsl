@@ -119,12 +119,24 @@ float4 psMain(Vertex input) : SV_Target {
     fillAlpha *= smoothstep(0, 5 * dip, -d);
     float3 filled = sampleDesktop(pos) * (1-shade);
     color = lerp(color, lerp(filled, material.z.xxx, .18), fillAlpha / .34);
+    // The liquid is an independently emissive HDR layer, rather than SDR white.
+    // Spend only available display headroom; preserve brighter transmitted detail.
+    float liquidHeadroom = feedback.w > .5 ? max(hdr.z - material.z, 0) : 0;
+    float liquidTarget = material.z + .68 * liquidHeadroom;
+    float liquidLuma = dot(color, float3(.2126,.7152,.0722));
+    color += max(liquidTarget-liquidLuma,0) * (fillAlpha/.34) * .90 * step(.5,feedback.w);
     float meniscus = saturate(1 - abs(p.y - fillTop) / max(dip, 1));
     meniscus *= step(.002, material.y) * step(material.y, .998) * smoothstep(0, 3 * dip, -d);
     float darkLine = 1-smoothstep(.55*dip,1.2*dip,abs(p.y-fillTop-2*dip));
     darkLine *= step(.002,material.y)*step(material.y,.998)*smoothstep(0,3*dip,-d);
-    color *= 1-.80*whiteAdapt*darkLine;
-    color = lerp(color, material.z.xxx, meniscus * .5);
+    color *= 1-(feedback.w > .5 ? .95 : .80)*whiteAdapt*darkLine;
+    if (feedback.w > .5) {
+        float surfaceTarget = material.z + .88 * liquidHeadroom;
+        float surfaceLuma = dot(color,float3(.2126,.7152,.0722));
+        color += max(surfaceTarget-surfaceLuma,0) * meniscus * .90;
+    } else {
+        color = lerp(color, material.z.xxx, meniscus * .5);
+    }
     // Layer the solid glass after the liquid, so the fill cannot erase reflections.
     // Translucent contour shadow, composited above the fill and below reflections.
     // Soften only its mask: the transmitted desktop stays sharp. Confine it to

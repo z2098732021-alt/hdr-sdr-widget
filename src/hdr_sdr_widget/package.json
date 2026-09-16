@@ -1,7 +1,7 @@
 {
   "name": "hdr-sdr-widget",
   "private": true,
-  "version": "0.4.5",
+  "version": "0.4.6",
   "type": "module",
   "description": "Windows HDR「SDR 内容亮度」悬浮控制器 —— Apple Liquid Glass 深色毛玻璃面板",
   "scripts": {
