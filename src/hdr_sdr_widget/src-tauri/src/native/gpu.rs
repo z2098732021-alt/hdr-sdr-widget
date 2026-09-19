@@ -25,8 +25,10 @@ pub struct RenderSnapshot {
     pub pointer: [f32; 4],
     pub timing: [f32; 4],
     pub hdr: [f32; 4],
+    pub control: [f32; 4],
 }
 pub struct Gpu {
+    pub monitor_key: String,
     pub device: ID3D11Device,
     pub context: ID3D11DeviceContext,
     pub output: IDXGIOutput,
@@ -249,6 +251,7 @@ impl Gpu {
         let peak_fallback = !reported_peak.is_finite() || reported_peak <= 0.0;
         let peak_nits = if peak_fallback { 400.0 } else { reported_peak };
         let mut gpu = Self {
+            monitor_key: hdr_sdr_widget_lib::win32::display::key_at_point(x,y).unwrap_or_default(),
             device,
             context,
             output,

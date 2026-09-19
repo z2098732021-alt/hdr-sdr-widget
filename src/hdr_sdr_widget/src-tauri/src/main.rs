@@ -38,6 +38,9 @@ compile_error!(
 );
 
 mod anim;
+mod brightness;
+mod brightness_audit;
+mod dimmer;
 mod native;
 mod autostart;
 mod backdrop;
@@ -94,6 +97,13 @@ fn start_monitor_watch(app: &tauri::AppHandle) {
             // `recv()` 返回 Err 表示监听端已退出（进程收尾），自然结束即可。
             while let Ok(ev) = rx.recv() {
                 let state = app.state::<AppState>();
+                if let Some(worker) = state.brightness.get() {
+                    match &ev {
+                        MonitorEvent::SettingChange => worker.refresh(),
+                        MonitorEvent::DisplayChange | MonitorEvent::PowerDisplay(DisplayPowerState::On) => worker.invalidate(),
+                        _ => {}
+                    }
+                }
                 match ev {
                     MonitorEvent::DisplayChange => {
                         native::invalidate_capture();
@@ -148,6 +158,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::list_monitors,
             commands::read_sdr_level,
+            commands::read_brightness,
+            commands::set_control_mode,
+            commands::reprobe_brightness,
             commands::apply_percent,
             commands::apply_preset,
             commands::get_settings,
@@ -235,6 +248,18 @@ fn main() {
             }
 
             // 背景捕获线程 + 贴边状态机线程（捕获区域由状态机随状态刷新）。
+            {
+                let state = app.state::<AppState>();
+                let settings = state.settings.lock().unwrap().clone();
+                let worker = brightness::Worker::start(settings.last_monitor_key, settings.follow_mouse_monitor,
+                    settings.control_modes, hwnd);
+                let _ = state.brightness.set(worker);
+                if let Some(path) = std::env::var_os("HSDR_BRIGHTNESS_AUDIT") {
+                    if std::env::var_os("HSDR_CONFIG_DIR").is_some() {
+                        brightness_audit::start(state.brightness.get().unwrap().clone(), path.into());
+                    }
+                }
+            }
             if !native::enabled() { app.manage(capture::spawn(Arc::clone(&capture))); }
             if !native::enabled() { app.manage(edge::start(handle.clone(), capture_edge, hwnd)); }
             // 把捕获共享槽挂到 AppState，供 `get_capture_stats` 诊断命令读取。

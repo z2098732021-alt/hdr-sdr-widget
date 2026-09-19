@@ -15,7 +15,8 @@ use tauri::{AppHandle, State};
 use base64::Engine as _;
 
 use hdr_sdr_widget_lib::core::controller::{real_controller, RealController, WriteRoute};
-use hdr_sdr_widget_lib::core::model::{DisplayState, DisplayTarget, Percent, WriteResult};
+use hdr_sdr_widget_lib::core::model::{DisplayState, DisplayTarget, Percent};
+use crate::brightness::WriteResult;
 use hdr_sdr_widget_lib::error::AppError;
 use hdr_sdr_widget_lib::win32::capture::{CaptureShared, CaptureStatsSnapshot};
 
@@ -48,6 +49,7 @@ use crate::store::settings::{AppSettings, SettingsStore};
 ///   "采集端做了什么"，一个是"渲染端看到了什么"，两边对不上就能把故障
 ///   锁定在中间的协议层。
 pub struct AppState {
+    pub brightness: std::sync::OnceLock<Arc<crate::brightness::Worker>>,
     pub controller: Mutex<RealController>,
     pub settings: Mutex<AppSettings>,
     pub current_key: Mutex<Option<String>>,
@@ -70,6 +72,7 @@ impl AppState {
         // 每次都退化到"主屏 / 第一台"——副屏用户的选择在重启后就没了。
         let remembered = settings.last_monitor_key.clone();
         Self {
+            brightness: std::sync::OnceLock::new(),
             controller: Mutex::new(real_controller()),
             settings: Mutex::new(settings),
             current_key: Mutex::new(if remembered.is_empty() { None } else { Some(remembered) }),
@@ -346,7 +349,7 @@ pub fn read_sdr_level(
 }
 
 /// 写入指定显示器（默认当前选中）的 SDR 内容亮度百分比。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_percent(
     key: String,
     percent: u8,
@@ -357,24 +360,14 @@ pub fn apply_percent(
             "百分比 {percent} 超出 0–100 范围"
         ))));
     }
-    if crate::native::enabled() {
-        if let Some(result)=crate::native::apply_confirmed(key.clone(),percent) {
-            remember_current_key(&state,&key);return Ok(result);
-        }
-    }
-    let mut controller = state
-        .controller
-        .lock()
-        .map_err(|_| CommandError::from("控制器锁不可用".to_string()))?;
-    let result = controller.set_percent(&key, Percent::new(percent)).map_err(CommandError::from)?;
-    // 记录用户最近操作的显示器（内存 + 落盘）。
-    drop(controller);
+    let worker = state.brightness.get().ok_or_else(|| CommandError::from("亮度服务尚未启动".to_owned()))?;
+    let result = worker.submit_confirmed(key.clone(), percent);
     remember_current_key(&state, &key);
     Ok(result)
 }
 
 /// 一键应用预设（day / movie / night）。作用于当前选中显示器。
-#[tauri::command]
+#[tauri::command(async)]
 pub fn apply_preset(
     preset: String,
     state: State<AppState>,
@@ -396,50 +389,34 @@ pub fn apply_preset(
             .ok_or_else(|| CommandError::from(format!("未知预设：{preset}")))?
     };
 
-    if crate::native::enabled() {
-        let key=state.current_key.lock().unwrap().clone().unwrap_or_default();
-        if !key.is_empty() {return apply_percent(key,percent,state);}
+    let worker = state.brightness.get().ok_or_else(|| CommandError::from("亮度服务尚未启动".to_owned()))?;
+    let key = worker.reading().key;
+    apply_percent(key, percent, state)
+}
+
+
+/// 读取配置。
+#[tauri::command]
+pub fn read_brightness(key: Option<String>, state: State<AppState>) -> Result<crate::brightness::Reading, CommandError> {
+    let worker = state.brightness.get().ok_or_else(|| CommandError::from("亮度服务尚未启动".to_owned()))?;
+    Ok(match key { Some(key) => worker.reading_for(&key), None => worker.reading() })
+}
+
+#[tauri::command]
+pub fn set_control_mode(key: String, mode: crate::brightness::Mode, state: State<AppState>) -> Result<(), CommandError> {
+    let worker = state.brightness.get().ok_or_else(|| CommandError::from("亮度服务尚未启动".to_owned()))?;
+    {
+        let mut settings = state.settings.lock().unwrap();
+        settings.control_modes.insert(key.clone(),mode);
+        state.store.save(&settings).map_err(CommandError::from)?;
     }
+    worker.set_mode(&key,mode);
+    Ok(())
+}
 
-    let mut controller = state
-        .controller
-        .lock()
-        .map_err(|_| CommandError::from("控制器锁不可用".to_string()))?;
-    let key = {
-        let cur = state
-            .current_key
-            .lock()
-            .map_err(|_| CommandError::from("状态锁不可用".to_string()))?;
-        cur.clone().unwrap_or_default()
-    };
-
-    if key.is_empty() {
-        // 从未选过显示器：选主显示器 / 第一台。
-        let states = controller.refresh().map_err(CommandError::from)?;
-        let chosen = states
-            .iter()
-            .find(|s| s.target.is_primary)
-            .or_else(|| states.first())
-            .ok_or_else(|| CommandError::from("未枚举到任何活动显示器".to_string()))?
-            .target
-            .key
-            .clone();
-        let result = controller
-            .set_percent(&chosen, Percent::new(percent))
-            .map_err(CommandError::from)?;
-        drop(controller);
-        remember_current_key(&state, &chosen);
-        return Ok(result);
-    }
-
-    let result = controller
-        .set_percent(&key, Percent::new(percent))
-        .map_err(CommandError::from)?;
-    drop(controller);
-    // 非空分支理论上 key 已经落过盘（它就是从 `current_key` 来的），这里再走一次
-    // 是幂等的：`remember_current_key` 内部有相等判断，不会重复写盘。
-    remember_current_key(&state, &key);
-    Ok(result)
+#[tauri::command]
+pub fn reprobe_brightness(state: State<AppState>) {
+    if let Some(worker) = state.brightness.get() { worker.invalidate(); }
 }
 
 /// 读取配置。
@@ -466,6 +443,14 @@ pub fn set_settings(
     *guard = next.clone();
     state.store.save(&guard).map_err(CommandError::from)?;
     drop(guard);
+
+    if let Some(worker) = state.brightness.get() {
+        worker.follow_mouse(next.follow_mouse_monitor);
+        for r in worker.readings() {
+            let mode = next.control_modes.get(&r.key).copied().unwrap_or_default();
+            if mode != r.mode { worker.set_mode(&r.key,mode); }
+        }
+    }
 
     // 自启状态按配置同步（幂等）。
     crate::autostart::sync(next.autostart).map_err(CommandError::from)?;

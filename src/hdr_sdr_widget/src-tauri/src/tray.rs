@@ -6,7 +6,7 @@
 //! v0.2.0：胶囊 UI 精简为纯玻璃 + Fill（无图标 / 无文字），三档亮度预设
 //! 的入口迁移到托盘菜单，避免破坏胶囊的克制观感。
 
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu, CheckMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
@@ -65,11 +65,26 @@ pub fn build_tray(app: &AppHandle) -> Result<(), String> {
             "quit" => {
                 crate::native::stop();
                 let state = app.state::<crate::AppState>();
+                if let Some(worker) = state.brightness.get() { worker.stop(); }
                 let _ = crate::window::hide(app, &state);
                 if let Ok(guard) = state.settings.lock() {
                     let _ = state.store.save(&guard);
                 }
                 app.exit(0);
+            }
+            "brightness:reprobe" => crate::commands::reprobe_brightness(app.state::<crate::AppState>()),
+            "brightness:restore" => {
+                if let Some(worker) = app.state::<crate::AppState>().brightness.get() { worker.restore_software(); }
+            }
+            id if id.starts_with("mode:") => {
+                let mut parts = id.splitn(3, ':'); parts.next();
+                let mode = match parts.next() { Some("hdr") => crate::brightness::Mode::Hdr, Some("ddc") => crate::brightness::Mode::Ddc,
+                    Some("software") => crate::brightness::Mode::Software, _ => crate::brightness::Mode::Auto };
+                if let Some(key) = parts.next() {
+                    if let Err(e) = crate::commands::set_control_mode(key.into(), mode, app.state::<crate::AppState>()) {
+                        eprintln!("[brightness mode] {e:?}");
+                    }
+                }
             }
             _ => {}
         })
@@ -88,5 +103,46 @@ pub fn build_tray(app: &AppHandle) -> Result<(), String> {
         .build(app)
         .map_err(|e| format!("创建托盘图标失败：{e}"))?;
 
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut signature = String::new();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(750));
+            let state = app.state::<crate::AppState>();
+            let Some(worker) = state.brightness.get() else { continue; };
+            let readings = worker.readings();
+            let next = readings.iter().map(|r| format!("{}:{:?}:{:?}:{:?}:{}",r.key,r.mode,r.backend,r.fallback_reason,r.can_control)).collect::<Vec<_>>().join("|");
+            if next == signature { continue; } signature = next;
+            if let Ok(menu) = control_menu(&app, &readings) {
+                if let Some(tray) = app.tray_by_id("main-tray") { let _ = tray.set_menu(Some(menu)); }
+            }
+        }
+    });
     Ok(())
+}
+
+fn control_menu(app: &AppHandle, readings: &[crate::brightness::Reading]) -> tauri::Result<Menu<tauri::Wry>> {
+    use crate::brightness::Mode;
+    let menu = Menu::new(app)?;
+    menu.append(&MenuItem::with_id(app,"show","显示/隐藏滑条",true,None::<&str>)?)?;
+    let controls = Submenu::new(app,"亮度控制方式",true)?;
+    for r in readings {
+        let display = Submenu::new(app,&r.name,true)?;
+        display.append(&MenuItem::new(app,format!("当前：{}",r.backend.label()),false,None::<&str>)?)?;
+        if let Some(reason) = &r.fallback_reason { display.append(&MenuItem::new(app,reason,false,None::<&str>)?)?; }
+        for (id,label,mode) in [("auto","自动",Mode::Auto),("hdr","HDR SDR 内容亮度",Mode::Hdr),("ddc","DDC/CI 硬件亮度",Mode::Ddc),("software","软件压暗",Mode::Software)] {
+            display.append(&CheckMenuItem::with_id(app,format!("mode:{id}:{}",r.key),label,true,r.mode==mode,None::<&str>)?)?;
+        }
+        controls.append(&display)?;
+    }
+    menu.append(&controls)?;
+    menu.append(&MenuItem::with_id(app,"brightness:reprobe","重新检测显示器控制能力",true,None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app,"brightness:restore","恢复所有屏幕的软件亮度",true,None::<&str>)?)?;
+    let presets = Submenu::new(app,"预设亮度",true)?;
+    for (id,label) in [("day","白天"),("movie","观影"),("night","夜间")] { presets.append(&MenuItem::with_id(app,format!("preset:{id}"),label,true,None::<&str>)?)?; }
+    menu.append(&presets)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(app,"diag","诊断面板…",true,None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app,"quit","退出",true,None::<&str>)?)?;
+    Ok(menu)
 }

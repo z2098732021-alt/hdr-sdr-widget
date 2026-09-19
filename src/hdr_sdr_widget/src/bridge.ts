@@ -37,8 +37,8 @@ export interface SdrReading {
 
 /** 写入结果（`core::model::WriteResult`，serde tag="kind"）。 */
 export type WriteResult =
-  | { kind: "applied"; raw: number }
-  | { kind: "adjusted"; requested: number; actual: number }
+  | { kind: "applied"; percent: number; backend: BrightnessBackend }
+  | { kind: "adjusted"; requested: number; actual: number; backend: BrightnessBackend }
   | { kind: "failed"; code: string; message: string; win32?: number };
 
 /** 错误载荷（`commands::CommandError`）。 */
@@ -58,6 +58,7 @@ export interface Preset {
 
 /** 配置（`store::settings::AppSettings`，camelCase）。 */
 export interface AppSettings {
+  controlModes: Record<string, ControlMode>;
   version: number;
   unit: "percent" | "nits" | "multiple";
   step: number;
@@ -531,4 +532,15 @@ export async function run<T>(op: () => Promise<T>): Promise<{ ok: true; value: T
   } catch (e) {
     return { ok: false, error: toCommandError(e) };
   }
+}
+
+export type ControlMode = "auto" | "hdr" | "ddc" | "software";
+export type BrightnessBackend = "hdr" | "ddc" | "software" | "unavailable";
+export interface BrightnessReading {
+  key: string; name: string; percent: number; mode: ControlMode; backend: BrightnessBackend;
+  canControl: boolean; hdrEnabled: boolean; raw: number | null; nits: number | null;
+  softwareTransmission: number; captureSafe: boolean; error: string | null; fallbackReason: string | null;
+}
+export function readBrightness(key?: string): Promise<BrightnessReading> {
+  return invoke<BrightnessReading>("read_brightness", { key: key ?? null });
 }

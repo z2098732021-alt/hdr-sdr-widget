@@ -1,5 +1,5 @@
 //! Native capsule: one render clock, screen-space optics, velocity-continuous input.
-mod brightness;
+use crate::brightness;
 mod capture;
 mod gpu;
 pub mod motion;
@@ -107,14 +107,6 @@ pub fn diagnostics() -> Diagnostics {
 pub fn position() -> Option<(i32, i32)> {
     SHARED.get().map(|s| *s.position.lock().unwrap())
 }
-pub fn apply_confirmed(
-    key: String,
-    percent: u8,
-) -> Option<hdr_sdr_widget_lib::core::model::WriteResult> {
-    SHARED
-        .get()
-        .map(|s| s.brightness.submit_confirmed(key, percent))
-}
 pub fn stop() {
     if let Some(s) = SHARED.get() {
         s.stop.store(true, Ordering::Release);
@@ -190,27 +182,14 @@ pub fn start(app: tauri::AppHandle) -> Result<()> {
         windows::core::Error::new(windows::core::HRESULT(0x80004005u32 as i32), e.to_string())
     })?;
     let hwnd = window::widget_hwnd(&window).unwrap();
-    let key = app
-        .state::<AppState>()
-        .current_key
-        .lock()
-        .unwrap()
-        .clone()
-        .unwrap_or_default();
     let pos = window.outer_position().unwrap_or_default();
-    let follow_mouse = app
-        .state::<AppState>()
-        .settings
-        .lock()
-        .unwrap()
-        .follow_mouse_monitor;
     let shared = Arc::new(Shared {
         inputs: Mutex::new(VecDeque::new()),
         stop: AtomicBool::new(false),
         reset_capture: AtomicBool::new(false),
         diagnostics: Mutex::new(Diagnostics::default()),
         position: Mutex::new((pos.x, pos.y)),
-        brightness: brightness::Worker::start(key, follow_mouse),
+        brightness: app.state::<AppState>().brightness.get().expect("brightness service").clone(),
     });
     let _ = SHARED.set(shared.clone());
     unsafe {
@@ -386,6 +365,7 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
     let edge_test = flag("HSDR_EDGE_TEST");
     let edge_left = flag("HSDR_EDGE_LEFT");
     let material_test = flag("HSDR_MATERIAL_TEST");
+    let optics_test = flag("HSDR_OPTICS_TEST");
     let record_dir = std::env::var_os("HSDR_RECORD")
         .filter(|v| !v.is_empty())
         .map(std::path::PathBuf::from);
@@ -618,7 +598,7 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
                                 phase: Phase::Dragging,
                             },
                         );
-                    } else if input.mode == Gesture::Value && reading.hdr {
+                    } else if input.mode == Gesture::Value && reading.can_control {
                         let elapsed = at.duration_since(input.last_at).as_secs_f64().max(0.001);
                         input.velocity.1 = ((py - input.last.1) as f64 / elapsed)
                             .clamp(-2500.0 * scale, 2500.0 * scale);
@@ -688,7 +668,7 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
                             y.target + m.margin as f64,
                         );
                         window::emit_state(&app, &s);
-                    } else if reading.hdr {
+                    } else if reading.can_control {
                         let p = (1.0
                             - (py as f64
                                 - y.position
@@ -736,7 +716,7 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
                     }
                 }
                 Input::Wheel(delta, shift) => {
-                    if reading.hdr && input.mode == Gesture::None {
+                    if reading.can_control && input.mode == Gesture::None {
                         let s = app.state::<AppState>();
                         let settings = s.settings.lock().unwrap();
                         let step = if shift {
@@ -979,14 +959,17 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
             }
         }
         if let Some(gpu) = &mut g {
+            // Follow-mouse control can target another screen. Optical color and
+            // dimming belong to the screen carrying the capsule, not that target.
+            let surface = shared.brightness.reading_for(&gpu.monitor_key);
             let mut snapshot = RenderSnapshot {
                 viewport: [host_w as f32, host_h as f32, host_x as f32, host_y as f32],
                 capsule: [cx as f32, cy as f32, hw as f32, hh as f32],
                 material: [
                     scale as f32,
                     fill.position as f32,
-                    if reading.hdr {
-                        (reading.raw as f32 / 1000.0).max(1.0)
+                    if surface.hdr {
+                        (surface.sdr_white_raw as f32 / 1000.0).max(1.0)
                     } else {
                         1.0
                     },
@@ -996,9 +979,11 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
                     hover.position as f32,
                     pressure.position as f32,
                     overscroll.position as f32,
-                    if reading.hdr { 1.0 } else { 0.0 },
+                    if surface.hdr { 1.0 } else { 0.0 },
                 ],
                 optics: tuning::OPTICS,
+                control: [if reading.can_control { 1.0 } else { 0.0 },
+                    surface.software_transmission.max(0.09), if surface.capture_safe { 1.0 } else { 0.0 }, 0.0],
                 timing: [dt as f32, reveal.position as f32, 0.0, 0.0],
                 pointer: [
                     (input.last.0 - host_x) as f32,
@@ -1016,6 +1001,7 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
                 snapshot.capsule[3] *= 1.0 + 0.012 * (t * 5.0).sin();
             }
             if test_dir.is_some() {
+                snapshot.control = [1.0, 1.0, 1.0, 0.0];
                 let shape = match stage {
                     0..=2 => (1.0, 1.0),
                     3..=4 => (1.04, 1.012),
@@ -1042,6 +1028,14 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
                 snapshot.material[1] = (stage % 5) as f32 / 4.0;
                 snapshot.material[3] = 1.0;
             }
+            if optics_test && test_dir.is_some() {
+                snapshot.capsule[1] = (m.margin + m.cap_h / 2) as f32;
+                snapshot.desktop[3] = 6.0 + (stage / 4 % 5) as f32;
+                snapshot.material[1] = 0.0;
+                snapshot.feedback[3] = 0.0;
+                snapshot.material[2] = 1.0;
+                snapshot.control[3] = if flag("HSDR_OPTICS_BASELINE") { 1.0 } else { 0.0 };
+            }
             let result = unsafe { gpu.resize(host_w, host_h).and_then(|_| gpu.draw(snapshot)) };
             if visual_audit {
                 unsafe {
@@ -1049,7 +1043,11 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
                 }
             }
             if let Some(dir) = &test_dir {
-                if [2, 4, 6, 8].contains(&stage) && dumped != stage {
+                if optics_test && result.is_ok() && ready_at.is_some() && stage % 4 == 2 && dumped != stage {
+                    let _ = unsafe { gpu.dump(&dir.join(format!("optics-{}.ppm",stage/4)),snapshot.material[2]) };
+                    dumped = stage;
+                }
+                if !optics_test && result.is_ok() && ready_at.is_some() && [2, 4, 6, 8].contains(&stage) && dumped != stage {
                     let _ = unsafe {
                         gpu.dump(
                             &dir.join(format!("shape-{stage}.ppm")),
@@ -1134,6 +1132,7 @@ fn run(app: tauri::AppHandle, hwnd: HWND, shared: Arc<Shared>) -> Result<()> {
                     if fresh {
                         if ready_at.is_none() && (test_dir.is_some() || record_dir.is_some()) {
                             test_started = Instant::now();
+                            dumped = u64::MAX;
                         }
                         ready_at.get_or_insert(submitted);
                         if let Some(previous) = last_capture_at.replace(submitted) {

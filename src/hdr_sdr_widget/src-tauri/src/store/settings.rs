@@ -13,7 +13,7 @@ use hdr_sdr_widget_lib::error::AppError;
 use crate::edge::Edge;
 
 /// 配置文件的磁盘版本号。结构变更时递增并实现迁移（v1 → v2 新增贴边字段）。
-pub const SETTINGS_VERSION: u32 = 2;
+pub const SETTINGS_VERSION: u32 = 3;
 
 /// 预设档位。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +75,8 @@ pub enum Unit {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
+    #[serde(default)]
+    pub control_modes: std::collections::HashMap<String, crate::brightness::Mode>,
     pub version: u32,
     /// 数值显示单位。
     pub unit: Unit,
@@ -124,6 +126,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             version: SETTINGS_VERSION,
+            control_modes: std::collections::HashMap::new(),
             unit: Unit::Percent,
             step: 1,
             step_shift: 5,
@@ -273,7 +276,7 @@ mod tests {
     #[test]
     fn v2贴边字段与版本() {
         let s = AppSettings::default();
-        assert_eq!(s.version, 2);
+        assert_eq!(s.version, SETTINGS_VERSION);
         assert_eq!(s.dock_side, None);
         assert_eq!(s.widget_y, 220);
 
@@ -297,6 +300,18 @@ mod tests {
         assert_eq!(s.dock_side, None);
         assert_eq!(s.widget_y, 220);
         assert_eq!(s.last_window_pos.x, 10);
+        assert!(s.control_modes.is_empty());
+    }
+
+    #[test]
+    fn control_modes_roundtrip_without_software_brightness_memory() {
+        let mut s = AppSettings::default();
+        s.control_modes.insert("display-a".into(),crate::brightness::Mode::Ddc);
+        s.control_modes.insert("display-b".into(),crate::brightness::Mode::Software);
+        let json = serde_json::to_string(&s).unwrap();
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.control_modes,s.control_modes);
+        assert!(!json.contains("softwareTransmission"));
     }
 
     #[test]

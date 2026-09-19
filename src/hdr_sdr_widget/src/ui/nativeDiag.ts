@@ -9,7 +9,7 @@ interface NativeDiagnostics {
   updatedAt: number; phase: string; visualAudit: boolean;
   presentationObservationGaps: number; inputSamples: number; startupInputToSubmitMs: number;
   captureToSubmitP95Ms: number; captureUpdateGapMaxMs: number;
-  brightness: {percent: number; raw: number; confirmed: boolean; error: string | null};
+  brightness: {percent: number; raw: number | null; backend: string; mode: string; canControl: boolean; ddcAvailable: boolean; ddcError: string | null; fallbackReason: string | null; softwareTransmission: number; captureSafe: boolean; confirmed: boolean; error: string | null};
 }
 export async function mountNativeDiag(root: HTMLElement): Promise<boolean> {
   let latest = await invoke<NativeDiagnostics | null>("get_native_diagnostics");
@@ -42,7 +42,11 @@ export async function mountNativeDiag(root: HTMLElement): Promise<boolean> {
       ["捕获帧 / 提交帧", `${d.captured} / ${d.submitted}`],
       ["显示统计样本", `${d.presentationSamples}`],
       ["缓存帧年龄", `${d.captureAgeMs.toFixed(1)} ms`],
-      ["系统确认亮度", `${d.brightness.percent}% / raw ${d.brightness.raw}`],
+      ["实际亮度控制", `${d.brightness.backend}（选择：${d.brightness.mode}）`],
+      ["确认亮度", `${d.brightness.percent}%${d.brightness.raw === null ? "" : ` / raw ${d.brightness.raw}`}`],
+      ["DDC/CI 状态", d.brightness.ddcAvailable ? "读取可用，写入以回读为准" : d.brightness.ddcError || "未检测 / 当前不需要"],
+      ["控制降级原因", d.brightness.fallbackReason || "无"],
+      ["软件透光 / 捕获排除", `${(d.brightness.softwareTransmission * 100).toFixed(1)}% / ${d.brightness.captureSafe}`],
       ["亮度请求错误", d.brightness.error || "无"],
       ["回退原因", d.fallbackReason || "无"],
     ];

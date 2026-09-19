@@ -221,6 +221,18 @@ pub struct AdvancedColorInfo {
     pub bits_per_color_channel: u32,
 }
 
+/// Windows 11 SDK: GET_ADVANCED_COLOR_INFO_2 (15) distinguishes SDR/WCG/HDR.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct AdvancedColorInfo2 {
+    pub header: DeviceInfoHeader,
+    pub value: u32,
+    pub color_encoding: u32,
+    pub bits_per_color_channel: u32,
+    pub active_color_mode: u32,
+}
+const _: () = assert!(size_of::<AdvancedColorInfo2>() == 36);
+
 impl AdvancedColorInfo {
     /// 构造一个针对指定目标的读取请求。
     #[must_use]

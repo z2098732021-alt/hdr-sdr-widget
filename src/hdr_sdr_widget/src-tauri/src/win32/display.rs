@@ -90,6 +90,40 @@ fn query_active_paths() -> Result<RawConfig, AppError> {
     ))
 }
 
+/// Resolve one stable target to one desktop monitor. Clone topologies are deliberately
+/// rejected: a GDI source can represent several physical displays in that topology.
+pub fn monitor_for_key(key: &str) -> Result<(windows::Win32::Graphics::Gdi::HMONITOR, windows::Win32::Foundation::RECT), AppError> {
+    use windows::Win32::{Foundation::{BOOL, LPARAM, LUID, RECT}, Graphics::Gdi::*, Devices::Display::*};
+    let config = query_active_paths()?;
+    let path = config.paths.iter().find(|p| fetch_name(p.target.adapter_id, p.target.id)
+        .is_ok_and(|(_, k, _)| k == key)).ok_or(AppError::TargetNotFound)?;
+    if config.paths.iter().filter(|p| p.source.id == path.source.id
+        && p.source.adapter_id.as_u64() == path.source.adapter_id.as_u64()).count() != 1 {
+        return Err(AppError::Inconsistent("镜像显示无法唯一绑定物理显示器".into()));
+    }
+    let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
+    source.header = DISPLAYCONFIG_DEVICE_INFO_HEADER {
+        r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+        size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+        adapterId: LUID { LowPart: path.source.adapter_id.low, HighPart: path.source.adapter_id.high },
+        id: path.source.id,
+    };
+    if unsafe { DisplayConfigGetDeviceInfo(&mut source.header) } != 0 { return Err(AppError::TargetNotFound); }
+    struct Search { name: [u16; 32], result: Option<(HMONITOR, RECT)> }
+    unsafe extern "system" fn visit(h: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> BOOL {
+        let search = &mut *(data.0 as *mut Search);
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = size_of::<MONITORINFOEXW>() as u32;
+        if GetMonitorInfoW(h, &mut info.monitorInfo).as_bool() && info.szDevice == search.name {
+            search.result = Some((h, info.monitorInfo.rcMonitor));
+        }
+        BOOL(1)
+    }
+    let mut search = Search { name: source.viewGdiDeviceName, result: None };
+    unsafe { let _ = EnumDisplayMonitors(None, None, Some(visit), LPARAM(&mut search as *mut _ as isize)); }
+    search.result.ok_or(AppError::TargetNotFound)
+}
+
 /// 读取指定 (适配器, 目标) 的显示器友好名、设备路径与输出接口类型。
 fn fetch_name(adapter: Luid, id: u32) -> Result<(String, String, u32), AppError> {
     let mut req = TargetDeviceName::read_request(adapter, id);
@@ -106,6 +140,16 @@ fn fetch_name(adapter: Luid, id: u32) -> Result<(String, String, u32), AppError>
 
 /// 读取指定 (适配器, 目标) 的高级色彩（HDR）状态。
 fn fetch_hdr(adapter: Luid, id: u32) -> Result<HdrState, AppError> {
+    use crate::win32::ffi::AdvancedColorInfo2;
+    let mut modern = AdvancedColorInfo2 {
+        header: DeviceInfoHeader::new(15, size_of::<AdvancedColorInfo2>() as u32, adapter, id),
+        value: 0, color_encoding: 0, bits_per_color_channel: 0, active_color_mode: 0,
+    };
+    let modern_rc = unsafe { crate::win32::ffi::DisplayConfigGetDeviceInfo(&mut modern.header) };
+    if modern_rc == ERROR_SUCCESS {
+        return Ok(decode_hdr_mode(modern.value, modern.active_color_mode, modern.bits_per_color_channel));
+    }
+    // Windows versions without the v2 query retain their original query path.
     let mut req = AdvancedColorInfo::read_request(adapter, id);
     let rc = unsafe {
         crate::win32::ffi::DisplayConfigGetDeviceInfo(
@@ -121,6 +165,10 @@ fn fetch_hdr(adapter: Luid, id: u32) -> Result<HdrState, AppError> {
         enabled: req.enabled(),
         bits_per_color: (req.bits_per_color_channel.min(255)) as u8,
     })
+}
+
+fn decode_hdr_mode(flags: u32, active_mode: u32, bits: u32) -> HdrState {
+    HdrState { supported: flags & (1 << 4) != 0, enabled: active_mode == 2, bits_per_color: bits.min(255) as u8 }
 }
 
 /// 读取指定 (适配器, 目标) 的 SDR 内容亮度 raw 值。
@@ -411,6 +459,16 @@ pub fn struct_size_report() -> [( &'static str, usize); 6] {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wcg_or_hdr_user_preference_is_not_active_hdr() {
+        // HDR-capable screen, advanced color active, HDR user preference on.
+        // Policy can still leave the actual compositor in WCG or SDR.
+        let flags = (1 << 4) | (1 << 5) | 3;
+        assert!(!super::decode_hdr_mode(flags, 0, 8).is_usable());
+        assert!(!super::decode_hdr_mode(flags, 1, 10).is_usable());
+        assert!(super::decode_hdr_mode(flags, 2, 10).is_usable());
+        assert!(!super::decode_hdr_mode(3, 1, 10).supported);
+    }
     use super::*;
 
     #[test]

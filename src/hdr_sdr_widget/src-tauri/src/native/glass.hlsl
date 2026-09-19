@@ -9,6 +9,7 @@ cbuffer Scene : register(b0) {
     float4 pointer;  // pressure center in local physical pixels
     float4 timing;   // elapsed seconds, reveal scale
     float4 hdr;      // sharp target, broad target, display peak (scRGB)
+    float4 control;  // adjustable, software transmission, capture exclusion valid, reserved
 };
 Texture2D<float4> background : register(t0);
 Texture2D<float4> adaptation : register(t1);
@@ -26,7 +27,30 @@ float3 pqToScRgb(float3 c) {
     float3 nits=10000*pow(max(p-.8359375,0)/max(18.8515625-18.6875*p,.000001),1.0/.1593017578125);
     return mul(float3x3(1.660491,-.587641,-.072850,-.124550,1.132900,-.008349,-.018151,-.100579,1.118730),nits/80.0);
 }
-float3 sampleDesktop(float2 p) {
+float3 sampleSourceDesktop(float2 p) {
+    // Explicit QA fixtures in screen space: grid, rings, checkerboard and bars.
+    if (desktop.w > 5.5) {
+        float2 xy = (p - viewport.zw - capsule.xy) / material.x;
+        float ink;
+        if (desktop.w > 9.5) {
+            const uint glyphs[7] = {244968089,260630671,260630664,244968089,110754201,126388359,253895202};
+            int2 pixel = int2(floor(float2(fmod(xy.x+140,35),fmod(xy.y+140,11))));
+            int column = pixel.x % 5;
+            ink = 0;
+            if (pixel.y < 7 && column < 4) ink = (glyphs[pixel.x/5] >> (27-pixel.y*4-column)) & 1;
+        } else if (desktop.w < 6.5) {
+            float2 gridDistance = abs(frac((xy + float2(2,3)) / 9) - .5) * 9;
+            ink = 1-smoothstep(.45,.95,min(gridDistance.x,gridDistance.y));
+        } else if (desktop.w < 7.5) {
+            float radius = length(xy - float2(9,0));
+            ink = 1-smoothstep(.4,1.0,abs(frac(radius / 5)-.5)*5);
+        } else if (desktop.w < 8.5) {
+            ink = fmod(floor((xy.x+200)/6)+floor((xy.y+200)/6),2);
+        } else {
+            ink = 1-smoothstep(.5,1,abs(frac((xy.x+1)/7)-.5)*7);
+        }
+        return lerp(material.z * .9, material.z * .015,ink);
+    }
     if (desktop.w > 4.5) return material.z * .03;
     if (desktop.w > 3.5) return material.z * .85;
     if (desktop.w > 2.5) return material.z.xxx;
@@ -39,6 +63,12 @@ float3 sampleDesktop(float2 p) {
     float2 uv = clamp(p, .5, desktop.xy - .5) / desktop.xy;
     float3 c = background.SampleLevel(linearSampler, uv, 0).rgb;
     return desktop.z>1.5 ? pqToScRgb(c) : desktop.z > .5 ? c : linearize(c) * material.z;
+}
+float3 sampleDesktop(float2 p) {
+    // Dimmers are excluded from capture. Apply their transmission once, only to
+    // transmitted desktop light; keep the control's own reflection/fill readable.
+    if (control.z < .5) return material.z * .035;
+    return sampleSourceDesktop(p) * clamp(control.y, .09, 1);
 }
 float4 psAdapt(Vertex input) : SV_Target {
     float luminance = 0;
@@ -85,16 +115,27 @@ float4 psMain(Vertex input) : SV_Target {
     // Zero first/second derivative at the flat face avoids a visible shoulder seam.
     // This is our tension-inspired profile, not an Apple-published/private formula.
     float t3 = t2 * t;
+    float t5 = t4 * t;
     float t6 = t4 * t2;
     float t7 = t6 * t;
     float heightScale = optics.x / 10.0;
-    float slope = heightScale * (.24 * t2 + 3.8 * t6);
+    // Broad low-curvature shoulder plus a steep, thin lip. Rounded ends use the
+    // same continuous capsule normal, producing the two-dimensional lens seen
+    // in the reference grid/rings without stretching the flat central face.
+    float slope = heightScale * (.34 * t2 + 2.6 * t4 + 1.8 * t6);
     float3 surfaceNormal = normalize(float3(normal * slope, 1));
     float3 ray = refract(float3(0, 0, -1), surfaceNormal, 1.0 / 1.5);
     // Trace to a planar back face with varying optical thickness.
     // This is an artistic bevel model, not Apple's private optical model.
-    float thickness = optics.x * dip * .55 + heightScale * band * (
-        .08 * (1 - t3) + (3.8 / 7.0) * (1 - t7));
+    float thickness = optics.x * dip * .85 + heightScale * band * (
+        (.34 / 3.0) * (1 - t3) + .52 * (1 - t5) + (1.8 / 7.0) * (1 - t7));
+    // Same GPU/fixture/lighting for old/new optical A/B; never enabled normally.
+    if (control.w > .5) {
+        slope = heightScale * (.24 * t2 + 3.8 * t6);
+        surfaceNormal = normalize(float3(normal * slope, 1));
+        ray = refract(float3(0, 0, -1), surfaceNormal, 1.0 / 1.5);
+        thickness = optics.x * dip * .55 + heightScale * band * (.08 * (1-t3) + (3.8/7.0)*(1-t7));
+    }
     float2 bend = ray.xy / max(-ray.z, .1);
     float2 pos = viewport.zw + p + bend * thickness;
     // Rim lighting stays narrow even though the refractive shoulder is wider.
@@ -169,7 +210,7 @@ float4 psMain(Vertex input) : SV_Target {
     color += min(max(hdr.z-contourLuma,0),material.z*contourLight) * border;
     float2 touch=(p-pointer.xy)/(18*dip);
     color += exp(-dot(touch,touch))*feedback.y*.055*material.z;
-    if (feedback.w < .5) {
+    if (control.x < .5) {
         float dotAlpha = saturate(.5 - (length(p - (capsule.xy + float2(0, -capsule.w + 12 * dip))) - 2.5 * dip));
         color = lerp(color, float3(1, .35, .01) * material.z, dotAlpha);
     }

@@ -361,6 +361,7 @@ export interface GlassElements {
 export interface GlassApi {
   setValue(pct: number, animate: boolean, distance?: number): void;
   setHdr(on: boolean): void;
+  setTransmission(value: number, captureSafe: boolean): void;
   showPress(x: number, y: number): void;
   hidePress(): void;
   /** 启动取帧链（幂等）。挂载时调用一次，之后常驻。 */
@@ -773,6 +774,10 @@ export function mountGlass(els: GlassElements): GlassApi {
         els.fill.style.transition = "none";
       }
       els.fill.style.height = `${p}%`;
+    },
+    setTransmission(value: number, captureSafe: boolean): void {
+      backdrop.style.filter = `brightness(${Math.max(0.09, Math.min(1, value))})`;
+      backdrop.style.visibility = captureSafe ? "visible" : "hidden";
     },
     setHdr(on: boolean): void {
       els.capsule.dataset.hdr = on ? "on" : "off";

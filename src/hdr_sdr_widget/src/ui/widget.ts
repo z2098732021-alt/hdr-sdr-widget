@@ -21,7 +21,7 @@ import {
   onWidgetShown,
   onWidgetState,
   openHdrSettings,
-  readSdrLevel,
+  readBrightness,
   setPointerPhase,
   type DragHint,
   type MonitorInfo,
@@ -150,7 +150,7 @@ export function mountWidget(app: HTMLElement): WidgetController {
     pendingPct = null;
     lastWriteAt = Date.now();
     if (!currentKey || !hdrEnabled) return;
-    void applyPercent(currentKey, pct).catch((e) => toastError(e));
+    void applyPercent(currentKey, pct).then(r => { if (r.kind === "failed") toastError({ message: r.message }); }).catch((e) => toastError(e));
   }
 
   /** 写值（leading 立即，trailing 补发最后一次）。 */
@@ -318,8 +318,9 @@ export function mountWidget(app: HTMLElement): WidgetController {
       const target = pickTarget(monitors, settings?.lastMonitorKey ?? "");
       if (!target) return;
       currentKey = target.key;
-      const reading = await readSdrLevel(target.key);
-      hdrEnabled = reading.hdrEnabled;
+      const reading = await readBrightness(target.key);
+      hdrEnabled = reading.canControl;
+      glass.setTransmission(reading.softwareTransmission, reading.captureSafe);
       glass.setHdr(hdrEnabled);
       glass.setValue(reading.percent, true);
     } catch {
@@ -336,6 +337,8 @@ export function mountWidget(app: HTMLElement): WidgetController {
 
   void getWidgetState().then(applyWidgetState).catch(() => {});
   void refresh();
+  const brightnessPoll = window.setInterval(() => { if (pointerMode === "none") void refresh(); }, 1000);
+  window.addEventListener("pagehide", () => window.clearInterval(brightnessPoll), { once: true });
 
   // ---- 相位保活（兜底重拉）----
   //
